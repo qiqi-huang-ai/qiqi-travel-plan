@@ -15,7 +15,7 @@ from pathlib import Path
 from route_matrix import build_matrix
 from trip_support import atomic_json, atomic_text, budget_limit, budget_verdict, canonical_hash, checkpoint, configure_console, inside, preflight
 
-RENDERER_VERSION = "4.1.0"
+RENDERER_VERSION = "5.0.0"
 HERE = Path(__file__).resolve().parent
 SKILL_ROOT = HERE.parent
 ATTRIBUTION_PATH = SKILL_ROOT / "assets" / "templates" / "attribution.json"
@@ -144,6 +144,36 @@ def _item_line(c, item):
     return lines
 
 
+def _duration_label(item: dict) -> str:
+    start, end = item.get("planned_start"), item.get("planned_end")
+    if not start or not end:
+        return "时长未知"
+    try:
+        minutes = int((datetime.fromisoformat(str(end).replace("Z", "+00:00")) - datetime.fromisoformat(str(start).replace("Z", "+00:00"))).total_seconds() // 60)
+    except ValueError:
+        return "时长未知"
+    return f"约 {minutes // 60} 小时" if minutes >= 60 and minutes % 60 == 0 else f"约 {minutes} 分钟"
+
+
+def _html_item_card(c: Ctx, item: dict) -> str:
+    kind = KIND.get(item.get("kind"), item.get("kind") or "行程")
+    verification = VERIFY.get(item.get("verification_status"), item.get("verification_status") or "待确认")
+    booking = _booking(item)
+    place = c.place_name(item.get("place_id"))
+    cost = money_range((item.get("cost") or {}).get("min"), (item.get("cost") or {}).get("max"), (item.get("cost") or {}).get("currency", c.cur))
+    tips = "".join(f"<li>{esc(tip)}</li>" for tip in item.get("tips", []))
+    admission = _admission_label(c, item)
+    return (
+        f"<article class='item timeline-card item-{esc(item.get('kind') or 'other')}' data-item-kind='{esc(item.get('kind') or 'other')}'>"
+        f"<div class='time-rail'><span class='time'>{esc(fmt_dt(item.get('planned_start')))}</span><i aria-hidden='true'></i><span class='time-end'>{esc(fmt_dt(item.get('planned_end')))}</span></div>"
+        f"<div class='item-body'><div class='item-topline'><span class='kind-badge'>{esc(kind)}</span><span class='status-badge status-{esc(item.get('verification_status') or 'unknown')}'>{esc(verification)}</span><span class='booking-badge'>{esc(booking)}</span></div>"
+        f"<h3>{esc(item.get('title') or '未命名行程')}</h3><p class='item-description'>{esc(item.get('description') or '—')}</p>"
+        f"<div class='item-meta'><span>地点 · {esc(place)}</span><span>时长 · {esc(_duration_label(item))}</span><span>费用 · {esc(cost)}</span></div>"
+        f"{f'<p class=\"admission-note\">{esc(admission)}</p>' if admission else ''}"
+        f"{f'<ul class=\"item-tips\">{tips}</ul>' if tips else ''}</div></article>"
+    )
+
+
 def render_md(c: Ctx) -> str:
     trip, req, it = c.trip, c.req, c.it; out = [f"# {it['summary']['title']}", "", f"> {it['summary'].get('tagline') or '把确定的安排、未知项和下一步放在同一份离线计划里。'}", "", f"**{STATUS.get(trip['status'], trip['status'])}** · 版本 v{trip['plan_version']} · {trip['trip_id']}", "", "## 1. 总览", "", f"- 目的地：{it['summary']['destination']}", f"- 日期：{c.date_range()}（{len(it['days'])} 天）", f"- 出发地：{req['origin'].get('name') or '未提供'}", f"- 同行：{c.party_brief()}", f"- 预算：{c.budget_brief()}；包含 {('、'.join(req['budget'].get('includes') or []) or '未说明')}", f"- 核查：{trip.get('checked_at') or '未核查'}", "", "## 2. 约束、假设与取舍", "", "### 必须满足", "", "- 必去：" + ("、".join(x["label"] for x in req["interests"]["must"]) or "无"), "- 喜欢：" + ("、".join(req["interests"]["like"]) or "未说明"), "- 不去：" + ("、".join(req["interests"]["avoid"]) or "无"), "", "### 假设", ""]
     out += [f"- {x}" for x in (it.get("assumptions") or ["无"])] + ["", "### 重要取舍", ""] + [f"- {x}" for x in (it.get("tradeoffs") or ["无"])] + ["", "## 3. 接口与资料能力", ""]
@@ -183,13 +213,14 @@ def render_html(c: Ctx) -> str:
         for item in day["items"]:
             admission = _admission_label(c, item)
             booking_text = f"活动预约：{_booking(item)}" + (f" · {admission}" if admission else "")
-            cards.append(f"<article class='item'><div class='time'>{esc(fmt_dt(item.get('planned_start')))}<span>—</span>{esc(fmt_dt(item.get('planned_end')))}</div><div><h3>{esc(item.get('title'))}</h3><p class='muted'>{esc(KIND.get(item.get('kind'), item.get('kind')))} · {esc(VERIFY.get(item.get('verification_status'), item.get('verification_status')))} · {esc(booking_text)}</p><p>{esc(item.get('description') or '—')}</p><p class='meta'>地点：{esc(c.place_name(item.get('place_id')))} · 费用：{esc(money_range((item.get('cost') or {}).get('min'), (item.get('cost') or {}).get('max'), (item.get('cost') or {}).get('currency', c.cur)))}</p>{('<ul>' + ''.join(f'<li>{esc(tip)}</li>' for tip in item.get('tips', [])) + '</ul>') if item.get('tips') else ''}</div></article>")
+            cards.append(_html_item_card(c, item))
         notes = "".join(f"<p class='note'>{esc(note)}</p>" for note in day.get("notes", []))
         days.append(f'<article class="day" id="day-{index}" data-day="{index}" data-day-date="{esc(day.get("date"))}"><div class="day-head"><span>D{index}</span><div><h2>{esc(fmt_date(day.get("date")))} · {esc(day.get("theme"))}</h2><p>{esc(day.get("region") or "—")} · {esc(INTENSITY.get(day.get("intensity"), day.get("intensity")))}</p></div></div>{notes}{"".join(cards)}</article>')
     overview = f"<div class='facts'><div><small>目的地</small><strong>{esc(it['summary']['destination'])}</strong></div><div><small>日期</small><strong>{esc(c.date_range())}</strong></div><div><small>同行</small><strong>{esc(c.party_brief())}</strong></div><div><small>预算</small><strong>{esc(c.budget_brief())}</strong></div></div><p>{esc(it['summary'].get('tagline') or '离线可读，事实、估算与下一步分层呈现。')}</p>"
     rail_nodes = "".join(f"<span class=\"rail-node\"><b>D{n}</b><small>{esc(fmt_date(day.get('date')))}</small></span>" for n, day in enumerate(it["days"], 1))
     route_rail = f"<div class=\"journey-rail\" aria-label=\"旅程骨架\"><div class=\"rail-line\"></div>{rail_nodes}</div>"
-    constraint = "<div class='columns'><div><h3>必去</h3><p>" + esc("、".join(x["label"] for x in req["interests"]["must"]) or "无") + "</p></div><div><h3>喜欢</h3><p>" + esc("、".join(req["interests"]["like"]) or "未说明") + "</p></div><div><h3>不去</h3><p>" + esc("、".join(req["interests"]["avoid"]) or "无") + "</p></div></div>"
+    constraint = "<div class='columns'><div><span class='section-kicker'>硬约束</span><h3>必去</h3><p>" + esc("、".join(x["label"] for x in req["interests"]["must"]) or "无") + "</p></div><div><span class='section-kicker'>偏好</span><h3>喜欢</h3><p>" + esc("、".join(req["interests"]["like"]) or "未说明") + "</p></div><div><span class='section-kicker'>排除项</span><h3>不去</h3><p>" + esc("、".join(req["interests"]["avoid"]) or "无") + "</p></div></div>"
+    assumptions = "<div class='reason-grid'><article><span class='section-kicker'>采用的假设</span><ul>" + "".join(f"<li>{esc(value)}</li>" for value in (it.get("assumptions") or ["暂无额外假设"])) + "</ul></article><article><span class='section-kicker'>重要取舍</span><ul>" + "".join(f"<li>{esc(value)}</li>" for value in (it.get("tradeoffs") or ["暂无额外取舍"])) + "</ul></article><article><span class='section-kicker'>暂未满足</span><ul>" + "".join(f"<li>{esc(value)}</li>" for value in (it.get("unmet") or ["当前没有列出的未满足项"])) + "</ul></article></div>"
     must_checks = [check for check in it["checklist"] if check.get("priority") == "must" and check.get("status") != "done"]
     action_rows = "".join(f"<article><small>{esc(PRIORITY.get(check.get('priority'), check.get('priority')))} · {esc(deadline_text(check))}</small><h3>{esc(check.get('action'))}</h3><p>{esc(check.get('if_unresolved') or '完成后在清单中勾选。')}</p></article>" for check in must_checks[:3])
     action_body = "<div class='action-grid'>" + (action_rows or "<p>核心准备事项已完成。</p>") + "</div>"
@@ -204,15 +235,15 @@ def render_html(c: Ctx) -> str:
     evidence_body = "<div class='evidence-list'>" + "".join(f"<p><b>{esc(fact['claim'])}</b><span>{esc(FACT.get(fact['status'], fact['status']))}</span></p>" for fact in trip["facts"]) + "</div>"
     queue = trip.get("recheck_queue", []); queue_body = "<ul>" + "".join(f"<li>{esc(entry['action'])}</li>" for entry in queue) + "</ul>" if queue else "<p>当前没有待复查事项。</p>"
     source_body = "<ul class='source-list'>" + "".join(f"<li>{esc(source['title'])} · {esc(source.get('source_type') or '未分类')}</li>" for source in trip["sources"]) + "</ul>"
-    lodging_regions = "".join(f"<li><b>{esc(region.get('name') or '未定')}</b>：{esc(region.get('pros') or '—')}</li>" for region in it["lodging"].get("regions", []))
-    lodging_budget = f"<p>{esc(it['lodging'].get('strategy') or '住宿策略未知')}</p><ul>{lodging_regions}</ul>{budget_body}"
+    lodging_rows = "".join(f"<tr><td><b>{esc(region.get('name') or '未定')}</b></td><td>{esc(region.get('pros') or '—')}</td><td>{esc(region.get('cons') or '待确认')}</td><td>{esc(region.get('budget_note') or '预算待确认')}</td></tr>" for region in it["lodging"].get("regions", []))
+    lodging_budget = f"<div class='strategy-card'><span class='section-kicker'>住宿策略</span><p>{esc(it['lodging'].get('strategy') or '住宿策略未知')}</p></div><div class='table-scroll'><table class='comparison-table'><thead><tr><th>片区</th><th>适合本行程的原因</th><th>代价/风险</th><th>预算提示</th></tr></thead><tbody>{lodging_rows or '<tr><td colspan=\"4\">住宿片区待确认</td></tr>'}</tbody></table></div>{budget_body}"
     variants_body = "".join(f"<article><h3>{esc(variant['title'])}{'（当前采用）' if variant.get('selected') else ''}</h3><p>{esc(variant['objective'])}</p><p class='muted'>取舍：{esc('；'.join(variant.get('tradeoffs') or []) or '无')}</p></article>" for variant in it.get("plan_variants", [])) or "<p>没有额外方案变体。</p>"
-    alternative_rows = "".join("<li>" + esc(alt["trigger"]) + " → " + esc(alt["description"]) + f"（{esc(alt.get('cost_delta') or '费用无变化')}；{esc(alt.get('time_delta') or '时间无变化')}）" + "</li>" for alt in it["alternatives"])
-    weather_alternatives = f"<p><b>{esc(WEATHER.get(it['weather'].get('kind'), it['weather'].get('kind')))}</b> · {esc(it['weather'].get('note') or '—')}</p><ul>{alternative_rows}</ul>"
+    alternative_rows = "".join(f"<tr><td><b>{esc(alt.get('trigger'))}</b></td><td>{esc(alt.get('description'))}</td><td>{esc(alt.get('rejoin_at_item_id') or '回到原路线前重新判断')}</td><td>{esc(alt.get('cost_delta') or '费用无变化')}<br>{esc(alt.get('time_delta') or '时间无变化')}</td></tr>" for alt in it["alternatives"])
+    weather_alternatives = f"<div class='weather-card'><span class='section-kicker'>天气与准备</span><p><b>{esc(WEATHER.get(it['weather'].get('kind'), it['weather'].get('kind')))}</b> · {esc(it['weather'].get('note') or '—')}</p></div><div class='table-scroll'><table class='alternatives-table'><thead><tr><th>触发条件</th><th>替换哪一段/怎么做</th><th>接回点</th><th>变化</th></tr></thead><tbody>{alternative_rows or '<tr><td colspan=\"4\">暂无备用方案</td></tr>'}</tbody></table></div>"
     evidence_section = "<details><summary>查看核查依据与待确认事项</summary>" + evidence_body + f"<h3>待复查事项（{len(queue)}）</h3>" + queue_body + "<h3>来源</h3>" + source_body + "</details>"
     day_switcher = '<nav id="day-switcher" class="day-switcher" aria-label="按天筛选"><button type="button" data-day-filter="all" aria-pressed="true">全部</button>' + "".join(f'<button type="button" data-day-filter="{n}" aria-pressed="false">D{n}</button>' for n in range(1, len(it["days"]) + 1)) + "</nav>"
     page_sections = "".join((
-        _html_section("总览", overview + route_rail, section_id="overview"), _html_section("现在要完成", action_body, section_id="actions"), _html_section("约束与取舍", constraint, cls="section departure-hide", section_id="constraints"), _html_section("每日行程", day_switcher + "".join(days), section_id="days"),
+        _html_section("总览", overview + route_rail, section_id="overview"), _html_section("现在要完成", action_body, section_id="actions"), _html_section("约束与取舍", constraint + assumptions, cls="section departure-hide", section_id="constraints"), _html_section("每日行程", day_switcher + "".join(days), section_id="days"),
         _html_section("方案变体", variants_body, cls="section departure-hide", section_id="variants"), _html_section("住宿、交通与预算", lodging_budget, cls="section departure-hide", section_id="stay"), _html_section("预约、天气与替代", weather_alternatives, cls="section departure-hide", section_id="alternatives"),
         _html_section("出发前清单", check_body, cls="section departure-hide", section_id="checklist"), _html_section("核查依据", evidence_section, cls="section departure-hide", section_id="evidence"),
     ))
@@ -232,11 +263,21 @@ def render_html(c: Ctx) -> str:
     Keeping this shell as a post-processing layer makes the business renderer
     and the offline reading experience independently testable.
     """
+    trip, req, it = c.trip, c.req, c.it
     page = _BASE_RENDER_HTML(c)
     nav_items = (("overview", "总览"), ("actions", "现在要做"), ("days", "每日行程"),
                  ("stay", "住宿预算"), ("alternatives", "天气替代"), ("checklist", "出发清单"),
                  ("evidence", "核查依据"))
     nav = "".join(f'<a href="#{key}" data-section="{key}">{label}</a>' for key, label in nav_items)
+    origin = esc(req.get("origin", {}).get("name") or "出发地待确认")
+    destination = esc(it.get("summary", {}).get("destination") or "目的地待确认")
+    route_days = "".join(f"<span>D{index}</span>" for index, _ in enumerate(it.get("days", []), 1))
+    hero_route = f'<div class="hero-route" aria-label="路线概览"><div class="route-line"><b>{origin}</b><i aria-hidden="true"></i><b>{destination}</b><i aria-hidden="true"></i><b>{origin}</b></div><div class="route-meta"><span>{esc(c.date_range())} · {len(it.get("days", []))} 天</span><span>{route_days}</span></div></div>'
+    pending = [check for check in it.get("checklist", []) if check.get("priority") == "must" and check.get("status") != "done"]
+    notice_items = "".join(f"<li><b>{esc(deadline_text(check))}</b> · {esc(check.get('action'))}<span>未完成：{esc(check.get('if_unresolved') or '—')}</span></li>" for check in pending[:4])
+    notice = f'<div class="plan-notice"><div><span class="section-kicker">执行提示</span><strong>{esc(STATUS.get(trip.get("status"), trip.get("status")))}</strong><p>先完成下面的关键事项，再把时间线当作可执行版本使用。</p></div><ul>{notice_items or "<li>当前没有未完成的核心准备项。</li>"}</ul></div>'
+    page = page.replace("</header>", hero_route + "</header>", 1)
+    page = page.replace("<div class='content'>", notice + "<div class='content'>", 1)
     sidebar = (f'<aside class="sidebar"><div class="sidebar-title">PLAN INDEX</div><nav id="section-nav">{nav}</nav>'
                '<div class="side-note">点击分区快速定位；每日行程可按天筛选。打开后无需联网。</div></aside>')
     page = page.replace("<div class='content'>", f'<div class="layout">{sidebar}<div class="content">', 1)
@@ -254,6 +295,9 @@ def render_html(c: Ctx) -> str:
 .floating-index a:hover,.floating-index a:focus{background:var(--ink);color:#fff}
 body.departure .floating-index{display:none}
 @media print{.floating-index{display:none!important}}
+.section-kicker{display:block;color:var(--coral);font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px}.reason-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}.reason-grid article,.strategy-card,.weather-card{border:1px solid var(--line);border-radius:16px;background:#fffdf8;padding:16px}.reason-grid ul{margin:8px 0 0;padding-left:20px}.timeline-card{position:relative;grid-template-columns:112px minmax(0,1fr);gap:22px;padding:20px 0}.time-rail{display:flex;flex-direction:column;align-items:flex-end;gap:6px;padding-top:2px;color:var(--coral);font-weight:800;font-variant-numeric:tabular-nums}.time-rail i{width:10px;height:10px;border:3px solid var(--coral);border-radius:50%;background:var(--paper);margin-right:4px}.time-end{color:var(--muted);font-size:13px}.item-body{min-width:0}.item-topline{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}.kind-badge,.status-badge,.booking-badge{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:3px 8px;font-size:11px;line-height:1.2;background:var(--wash);color:var(--deep)}.status-planned{background:#e6f2e9}.status-verified{background:#e4f0eb}.status-conditional,.status-unknown{background:#fff1df;color:#8b5a2f}.booking-badge{background:#fff8ee;color:#8b5a2f}.item-description{font-size:15px;margin:8px 0}.item-meta{display:flex;flex-wrap:wrap;gap:6px 16px;color:var(--muted);font-size:13px;margin-top:10px}.admission-note{color:var(--coral);font-size:13px}.item-tips{margin:10px 0 0;padding-left:20px;color:var(--muted);font-size:13px}.table-scroll{overflow-x:auto}.comparison-table,.alternatives-table{min-width:650px}.comparison-table td,.comparison-table th,.alternatives-table td,.alternatives-table th{vertical-align:top}.strategy-card,.weather-card{margin-bottom:14px}.hero-route{margin:26px 0 0;border:1px solid var(--line);border-radius:18px;background:linear-gradient(120deg,#edf7f0,#fff8ed);padding:14px 18px}.hero-route .route-line{display:flex;align-items:center;gap:8px;color:var(--ink);font-weight:800}.hero-route .route-line i{flex:1;height:3px;background:linear-gradient(90deg,var(--coral),var(--line));border-radius:999px}.hero-route .route-meta{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-top:6px}@media(max-width:760px){.reason-grid{grid-template-columns:1fr}.timeline-card{grid-template-columns:1fr;gap:8px}.time-rail{flex-direction:row;align-items:center;justify-content:flex-start;gap:8px}.time-rail i{order:2}.time-end{order:3}.hero-route .route-line{font-size:13px}.hero-route .route-line i{min-width:20px}}
+body.departure .reason-grid,body.departure .strategy-card,body.departure .weather-card{display:none}
+.plan-notice{margin:0 62px;padding:18px 20px;border:1px solid #e4b8a8;border-radius:18px;background:linear-gradient(110deg,#fff5ee,#fffaf1);display:grid;grid-template-columns:minmax(190px,.8fr) 1.2fr;gap:24px;align-items:start}.plan-notice strong{font-size:22px;color:var(--coral)}.plan-notice p{margin:3px 0 0;color:var(--muted)}.plan-notice ul{margin:0;padding-left:20px}.plan-notice li{margin:3px 0}.plan-notice li b{color:var(--coral);margin-right:6px}.plan-notice li span{display:block;color:var(--muted);font-size:12px}@media(max-width:760px){.plan-notice{margin:0 22px;grid-template-columns:1fr;gap:8px}}
 """
     page = page.replace("</style>", css + "</style>", 1)
     script = """
