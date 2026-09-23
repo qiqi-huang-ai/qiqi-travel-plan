@@ -1,0 +1,38 @@
+{
+  "trip_id": "2026-10-10-example-2d",
+  "plan_version": 1,
+  "content_hash": "e82f2af1b97cc6122d770efe3223a8395bbff0bcc99538f2bef0c206e7242b74",
+  "generated_at": "2026-09-23T14:35:30+08:00",
+  "renderer_version": "3.1.0",
+  "files": [
+    {
+      "path": "outputs/2026-10-10-example-2d_v1.md",
+      "kind": "md",
+      "sha256": "88f938abbec8fd2452e664239b41130b620e2499d38af9953c64748122bedb30",
+      "bytes": 12146
+    },
+    {
+      "path": "outputs/2026-10-10-example-2d_v1.html",
+      "kind": "html",
+      "sha256": "b6765319b1bf1322a81b08fd459d2f3cb41748e616fd6c6b2950b05dc3356173",
+      "bytes": 27524
+    }
+  ],
+  "coverage": {
+    "md": {
+      "required": 187,
+      "present": 187,
+      "missing": []
+    },
+    "html": {
+      "required": 187,
+      "present": 187,
+      "missing": []
+    }
+  },
+  "attribution": {
+    "text": "由 Travel Plan Pro 生成",
+    "md": true,
+    "html": true
+  }
+}

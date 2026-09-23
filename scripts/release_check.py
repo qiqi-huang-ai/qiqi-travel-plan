@@ -11,7 +11,18 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED = ("SKILL.md", "README.md", "LICENSE", "agents/openai.yaml", "assets/schemas/trip.schema.json")
+REQUIRED = (
+    "SKILL.md",
+    "README.md",
+    "LICENSE",
+    "agents/openai.yaml",
+    "assets/schemas/trip.schema.json",
+    "docs/USAGE.md",
+    "docs/images/travel-dossier-hero.png",
+    "docs/examples/trip.json",
+    "docs/examples/outputs/2026-10-10-example-2d_v1.md",
+    "docs/examples/outputs/2026-10-10-example-2d_v1.html",
+)
 IGNORED_LINK_PREFIXES = ("http://", "https://", "mailto:")
 FORBIDDEN_PARTS = {"__pycache__", ".DS_Store"}
 
