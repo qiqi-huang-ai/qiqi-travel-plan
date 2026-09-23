@@ -2,6 +2,7 @@
 """Run deterministic, network-free checks before packaging this Skill."""
 from __future__ import annotations
 
+import ast
 import os
 import re
 import subprocess
@@ -50,7 +51,9 @@ def check_markdown_links() -> None:
 
 def check_source() -> None:
     for path in ROOT.rglob("*.py"):
-        compile(path.read_text(encoding="utf-8"), str(path), "exec")
+        source = path.read_text(encoding="utf-8")
+        ast.parse(source, filename=str(path), feature_version=(3, 10))
+        compile(source, str(path), "exec")
     references = []
     for path in ROOT.rglob("*"):
         if not path.is_file() or path.suffix not in {".py", ".md", ".json", ".yaml", ".yml"}:
@@ -73,6 +76,9 @@ def run_tests() -> None:
 
 
 def main() -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     try:
         check_required()
         check_hygiene()
@@ -80,9 +86,9 @@ def main() -> int:
         check_source()
         run_tests()
     except (OSError, UnicodeError, ValueError) as error:
-        print(f"✖ release check failed: {error}", file=sys.stderr)
+        print(f"release check failed: {error}", file=sys.stderr)
         return 1
-    print("✔ release check passed: files, hygiene, links, syntax, tests")
+    print("release check passed: files, hygiene, links, syntax, tests")
     return 0
 
 
