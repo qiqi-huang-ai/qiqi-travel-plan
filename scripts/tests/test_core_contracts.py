@@ -138,6 +138,8 @@ class CoreContractTests(unittest.TestCase):
             self.assertIn("A SLOW ISLAND DAY", html)
             self.assertIn('class="sidebar"', html)
             self.assertIn('id="section-nav"', html)
+            self.assertIn('class="floating-index"', html)
+            self.assertIn('aria-label="浮动目录"', html)
             self.assertIn('id="day-switcher"', html)
             self.assertIn('class="journey-rail"', html)
             self.assertIn("localStorage", html)
