@@ -1,4 +1,4 @@
 interface:
-  display_name: "Travel Plan Pro"
-  short_description: "证据驱动的旅行规划、核查与离线 H5 交付"
-  default_prompt: "请使用 $travel-plan-pro，根据我的日期、预算、同行人和偏好制作一份可核查、可修改的旅行方案。"
+  display_name: "qiqi 旅行规划"
+  short_description: "把旅行想法整理成能照着走的行程和离线旅行页"
+  default_prompt: "请使用 $travel-plan-pro，按我的日期、同行人、预算和偏好，帮我做一份轻松、好执行的旅行计划。"
