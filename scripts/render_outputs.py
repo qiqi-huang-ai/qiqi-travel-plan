@@ -155,22 +155,49 @@ def _duration_label(item: dict) -> str:
     return f"约 {minutes // 60} 小时" if minutes >= 60 and minutes % 60 == 0 else f"约 {minutes} 分钟"
 
 
+def _place_rule_label(c: Ctx, place_id: str) -> str:
+    place = c.places.get(place_id or "", {})
+    windows = place.get("opening_windows") or []
+    if not windows:
+        return "开放时间未查到（按未知处理）"
+    parts = []
+    for window in windows[:2]:
+        if window.get("open") or window.get("close"):
+            parts.append(f"{window.get('open') or '—'}–{window.get('close') or '—'}")
+    return "；".join(parts) or "开放时间未查到（按未知处理）"
+
+
 def _html_item_card(c: Ctx, item: dict) -> str:
     kind = KIND.get(item.get("kind"), item.get("kind") or "行程")
     verification = VERIFY.get(item.get("verification_status"), item.get("verification_status") or "待确认")
     booking = _booking(item)
     place = c.place_name(item.get("place_id"))
+    place_record = c.places.get(item.get("place_id") or "", {})
+    region_label = f"<span>{esc(place_record.get('region'))}</span>" if place_record.get("region") else ""
     cost = money_range((item.get("cost") or {}).get("min"), (item.get("cost") or {}).get("max"), (item.get("cost") or {}).get("currency", c.cur))
     tips = "".join(f"<li>{esc(tip)}</li>" for tip in item.get("tips", []))
+    notes = item.get("notes")
+    fact_ids = item.get("fact_ids") or []
+    fact_details = ""
+    if fact_ids:
+        fact_details = "<details class='item-evidence'><summary>依据与复查（%d）</summary><ul>" % len(fact_ids)
+        for fact_id in fact_ids:
+            fact = c.facts.get(fact_id)
+            if fact:
+                fact_details += f"<li><b>{esc(fact.get('claim') or fact_id)}</b><span>{esc(FACT.get(fact.get('status'), fact.get('status') or '未知'))}</span></li>"
+        fact_details += "</ul></details>"
     admission = _admission_label(c, item)
     return (
         f"<article class='item timeline-card item-{esc(item.get('kind') or 'other')}' data-item-kind='{esc(item.get('kind') or 'other')}'>"
         f"<div class='time-rail'><span class='time'>{esc(fmt_dt(item.get('planned_start')))}</span><i aria-hidden='true'></i><span class='time-end'>{esc(fmt_dt(item.get('planned_end')))}</span></div>"
         f"<div class='item-body'><div class='item-topline'><span class='kind-badge'>{esc(kind)}</span><span class='status-badge status-{esc(item.get('verification_status') or 'unknown')}'>{esc(verification)}</span><span class='booking-badge'>{esc(booking)}</span></div>"
         f"<h3>{esc(item.get('title') or '未命名行程')}</h3><p class='item-description'>{esc(item.get('description') or '—')}</p>"
-        f"<div class='item-meta'><span>地点 · {esc(place)}</span><span>时长 · {esc(_duration_label(item))}</span><span>费用 · {esc(cost)}</span></div>"
+        f"<div class='item-meta'><span>时长 · {esc(_duration_label(item))}</span><span>费用 · {esc(cost)}</span><span>计价 · {esc((item.get('cost') or {}).get('basis') or '按当前计划口径')}</span></div>"
+        f"<div class='place-row'>📍 <b>{esc(place)}</b>{region_label}</div>"
+        f"<div class='rule-row'>◷ 开放/执行窗口 · {esc(_place_rule_label(c, item.get('place_id')))}</div>"
         f"{f'<p class=\"admission-note\">{esc(admission)}</p>' if admission else ''}"
-        f"{f'<ul class=\"item-tips\">{tips}</ul>' if tips else ''}</div></article>"
+        f"{f'<ul class=\"item-tips\">{tips}</ul>' if tips else ''}"
+        f"{f'<p class=\"item-note\">备注 · {esc(notes)}</p>' if notes else ''}{fact_details}</div></article>"
     )
 
 
@@ -215,7 +242,8 @@ def render_html(c: Ctx) -> str:
             booking_text = f"活动预约：{_booking(item)}" + (f" · {admission}" if admission else "")
             cards.append(_html_item_card(c, item))
         notes = "".join(f"<p class='note'>{esc(note)}</p>" for note in day.get("notes", []))
-        days.append(f'<article class="day" id="day-{index}" data-day="{index}" data-day-date="{esc(day.get("date"))}"><div class="day-head"><span>D{index}</span><div><h2>{esc(fmt_date(day.get("date")))} · {esc(day.get("theme"))}</h2><p>{esc(day.get("region") or "—")} · {esc(INTENSITY.get(day.get("intensity"), day.get("intensity")))}</p></div></div>{notes}{"".join(cards)}</article>')
+        day_stats = f"<div class='day-stats'><span>{len(day.get('items', []))} 个时间节点</span><span>片区 · {esc(day.get('region') or '待确认')}</span><span>节奏 · {esc(INTENSITY.get(day.get('intensity'), day.get('intensity') or '待确认'))}</span><span>含午休/机动 · {'是' if any(item.get('kind') in ('rest','buffer') for item in day.get('items', [])) else '待安排'}</span></div>"
+        days.append(f'<article class="day" id="day-{index}" data-day="{index}" data-day-date="{esc(day.get("date"))}"><div class="day-head"><span>D{index}</span><div><h2>{esc(fmt_date(day.get("date")))} · {esc(day.get("theme"))}</h2><p>{esc(day.get("region") or "—")} · {esc(INTENSITY.get(day.get("intensity"), day.get("intensity")))}</p></div></div>{day_stats}{notes}{"".join(cards)}</article>')
     overview = f"<div class='facts'><div><small>目的地</small><strong>{esc(it['summary']['destination'])}</strong></div><div><small>日期</small><strong>{esc(c.date_range())}</strong></div><div><small>同行</small><strong>{esc(c.party_brief())}</strong></div><div><small>预算</small><strong>{esc(c.budget_brief())}</strong></div></div><p>{esc(it['summary'].get('tagline') or '离线可读，事实、估算与下一步分层呈现。')}</p>"
     rail_nodes = "".join(f"<span class=\"rail-node\"><b>D{n}</b><small>{esc(fmt_date(day.get('date')))}</small></span>" for n, day in enumerate(it["days"], 1))
     route_rail = f"<div class=\"journey-rail\" aria-label=\"旅程骨架\"><div class=\"rail-line\"></div>{rail_nodes}</div>"
@@ -237,14 +265,19 @@ def render_html(c: Ctx) -> str:
     source_body = "<ul class='source-list'>" + "".join(f"<li>{esc(source['title'])} · {esc(source.get('source_type') or '未分类')}</li>" for source in trip["sources"]) + "</ul>"
     lodging_rows = "".join(f"<tr><td><b>{esc(region.get('name') or '未定')}</b></td><td>{esc(region.get('pros') or '—')}</td><td>{esc(region.get('cons') or '待确认')}</td><td>{esc(region.get('budget_note') or '预算待确认')}</td></tr>" for region in it["lodging"].get("regions", []))
     lodging_budget = f"<div class='strategy-card'><span class='section-kicker'>住宿策略</span><p>{esc(it['lodging'].get('strategy') or '住宿策略未知')}</p></div><div class='table-scroll'><table class='comparison-table'><thead><tr><th>片区</th><th>适合本行程的原因</th><th>代价/风险</th><th>预算提示</th></tr></thead><tbody>{lodging_rows or '<tr><td colspan=\"4\">住宿片区待确认</td></tr>'}</tbody></table></div>{budget_body}"
+    transport_rows = "".join(f"<article class='transport-card'><div><span class='section-kicker'>{esc(major.get('kind') or '大交通')}</span><h3>{esc(major.get('from'))} <b>→</b> {esc(major.get('to'))}</h3><p>{esc(major.get('depart') or '出发时间待确认')} · {esc(major.get('arrive') or '到达时间待确认')}</p></div><div class='transport-status'><span class='status-badge status-conditional'>{esc({'to_book':'待订','booked':'已订'}.get(major.get('status'), major.get('status') or '待确认'))}</span><strong>{esc(major.get('price_ref') or '价格待确认')}</strong></div><p class='transport-note'>{esc(major.get('note') or '—')}</p></article>" for major in it.get('transport_major', []))
+    transport_body = f"<div class='transport-grid'>{transport_rows or '<p>暂无大交通记录。</p>'}</div><p class='note'>待订的大交通只展示规划基准，不代表有票或可以按该价格购买。</p>"
     variants_body = "".join(f"<article><h3>{esc(variant['title'])}{'（当前采用）' if variant.get('selected') else ''}</h3><p>{esc(variant['objective'])}</p><p class='muted'>取舍：{esc('；'.join(variant.get('tradeoffs') or []) or '无')}</p></article>" for variant in it.get("plan_variants", [])) or "<p>没有额外方案变体。</p>"
     alternative_rows = "".join(f"<tr><td><b>{esc(alt.get('trigger'))}</b></td><td>{esc(alt.get('description'))}</td><td>{esc(alt.get('rejoin_at_item_id') or '回到原路线前重新判断')}</td><td>{esc(alt.get('cost_delta') or '费用无变化')}<br>{esc(alt.get('time_delta') or '时间无变化')}</td></tr>" for alt in it["alternatives"])
-    weather_alternatives = f"<div class='weather-card'><span class='section-kicker'>天气与准备</span><p><b>{esc(WEATHER.get(it['weather'].get('kind'), it['weather'].get('kind')))}</b> · {esc(it['weather'].get('note') or '—')}</p></div><div class='table-scroll'><table class='alternatives-table'><thead><tr><th>触发条件</th><th>替换哪一段/怎么做</th><th>接回点</th><th>变化</th></tr></thead><tbody>{alternative_rows or '<tr><td colspan=\"4\">暂无备用方案</td></tr>'}</tbody></table></div>"
-    evidence_section = "<details><summary>查看核查依据与待确认事项</summary>" + evidence_body + f"<h3>待复查事项（{len(queue)}）</h3>" + queue_body + "<h3>来源</h3>" + source_body + "</details>"
+    weather_entries = "".join(f"<li><b>{esc(entry.get('date'))}</b> · {esc(entry.get('summary'))}</li>" for entry in (it.get('weather', {}).get('entries') or []))
+    weather_prep = "；".join(it.get('weather', {}).get('prep') or [])
+    weather_alternatives = f"<div class='weather-card'><span class='section-kicker'>天气与准备</span><p><b>{esc(WEATHER.get(it['weather'].get('kind'), it['weather'].get('kind')))}</b> · {esc(it['weather'].get('note') or '—')}</p><ul class='weather-list'>{weather_entries or '<li>暂无逐日天气记录</li>'}</ul><p class='note'>准备建议 · {esc(weather_prep or '按季节和临近预报准备')}</p></div><div class='table-scroll'><table class='alternatives-table'><thead><tr><th>触发条件</th><th>替换哪一段/怎么做</th><th>接回点</th><th>变化</th></tr></thead><tbody>{alternative_rows or '<tr><td colspan=\"4\">暂无备用方案</td></tr>'}</tbody></table></div>"
+    risks = "<ul class='risk-list'>" + "".join(f"<li>{esc(risk)}</li>" for risk in (it.get('risks') or [])) + "</ul>"
+    evidence_section = "<details><summary>查看核查依据与待确认事项</summary>" + evidence_body + f"<h3>风险提示</h3>{risks}<h3>待复查事项（{len(queue)}）</h3>" + queue_body + "<h3>来源说明</h3><p class='note'>" + esc(it.get('sources_note') or '—') + "</p><h3>来源</h3>" + source_body + "</details>"
     day_switcher = '<nav id="day-switcher" class="day-switcher" aria-label="按天筛选"><button type="button" data-day-filter="all" aria-pressed="true">全部</button>' + "".join(f'<button type="button" data-day-filter="{n}" aria-pressed="false">D{n}</button>' for n in range(1, len(it["days"]) + 1)) + "</nav>"
     page_sections = "".join((
         _html_section("总览", overview + route_rail, section_id="overview"), _html_section("现在要完成", action_body, section_id="actions"), _html_section("约束与取舍", constraint + assumptions, cls="section departure-hide", section_id="constraints"), _html_section("每日行程", day_switcher + "".join(days), section_id="days"),
-        _html_section("方案变体", variants_body, cls="section departure-hide", section_id="variants"), _html_section("住宿、交通与预算", lodging_budget, cls="section departure-hide", section_id="stay"), _html_section("预约、天气与替代", weather_alternatives, cls="section departure-hide", section_id="alternatives"),
+        _html_section("方案变体", variants_body, cls="section departure-hide", section_id="variants"), _html_section("住宿比较", lodging_budget, cls="section departure-hide", section_id="stay"), _html_section("大交通与市内移动", transport_body, cls="section departure-hide", section_id="transport"), _html_section("预约、天气与替代", weather_alternatives, cls="section departure-hide", section_id="alternatives"),
         _html_section("出发前清单", check_body, cls="section departure-hide", section_id="checklist"), _html_section("核查依据", evidence_section, cls="section departure-hide", section_id="evidence"),
     ))
     deadline = next((deadline_at(check) for check in it["checklist"] if deadline_at(check)), "")
@@ -265,14 +298,15 @@ def render_html(c: Ctx) -> str:
     """
     trip, req, it = c.trip, c.req, c.it
     page = _BASE_RENDER_HTML(c)
-    nav_items = (("overview", "总览"), ("actions", "现在要做"), ("days", "每日行程"),
-                 ("stay", "住宿预算"), ("alternatives", "天气替代"), ("checklist", "出发清单"),
+    nav_items = (("overview", "旅行总览"), ("actions", "现在要做"), ("constraints", "规划依据"), ("days", "每日行程"),
+                 ("stay", "住宿预算"), ("transport", "大交通"), ("alternatives", "天气替代"), ("checklist", "出发清单"),
                  ("evidence", "核查依据"))
     nav = "".join(f'<a href="#{key}" data-section="{key}">{label}</a>' for key, label in nav_items)
     origin = esc(req.get("origin", {}).get("name") or "出发地待确认")
     destination = esc(it.get("summary", {}).get("destination") or "目的地待确认")
     route_days = "".join(f"<span>D{index}</span>" for index, _ in enumerate(it.get("days", []), 1))
-    hero_route = f'<div class="hero-route" aria-label="路线概览"><div class="route-line"><b>{origin}</b><i aria-hidden="true"></i><b>{destination}</b><i aria-hidden="true"></i><b>{origin}</b></div><div class="route-meta"><span>{esc(c.date_range())} · {len(it.get("days", []))} 天</span><span>{route_days}</span></div></div>'
+    hero_svg_nodes = "".join(f"<g><circle cx='{70 + index * 150}' cy='42' r='16'></circle><text x='{70 + index * 150}' y='47' text-anchor='middle'>D{index}</text></g>" for index, _ in enumerate(it.get("days", []), 1))
+    hero_route = f'<div class="hero-route" aria-label="路线概览"><svg class="hero-route-svg" viewBox="0 0 620 84" role="img" aria-label="{origin}到{destination}四日路线"><path d="M35 42 C120 12 160 72 250 42 S390 12 470 42 S540 72 585 42"></path>{hero_svg_nodes}</svg><div class="route-line"><b>{origin}</b><i aria-hidden="true"></i><b>{destination}</b><i aria-hidden="true"></i><b>{origin}</b></div><div class="route-meta"><span>{esc(c.date_range())} · {len(it.get("days", []))} 天</span><span>{route_days}</span></div></div>'
     pending = [check for check in it.get("checklist", []) if check.get("priority") == "must" and check.get("status") != "done"]
     notice_items = "".join(f"<li><b>{esc(deadline_text(check))}</b> · {esc(check.get('action'))}<span>未完成：{esc(check.get('if_unresolved') or '—')}</span></li>" for check in pending[:4])
     notice = f'<div class="plan-notice"><div><span class="section-kicker">执行提示</span><strong>{esc(STATUS.get(trip.get("status"), trip.get("status")))}</strong><p>先完成下面的关键事项，再把时间线当作可执行版本使用。</p></div><ul>{notice_items or "<li>当前没有未完成的核心准备项。</li>"}</ul></div>'
@@ -298,6 +332,8 @@ body.departure .floating-index{display:none}
 .section-kicker{display:block;color:var(--coral);font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px}.reason-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}.reason-grid article,.strategy-card,.weather-card{border:1px solid var(--line);border-radius:16px;background:#fffdf8;padding:16px}.reason-grid ul{margin:8px 0 0;padding-left:20px}.timeline-card{position:relative;grid-template-columns:112px minmax(0,1fr);gap:22px;padding:20px 0}.time-rail{display:flex;flex-direction:column;align-items:flex-end;gap:6px;padding-top:2px;color:var(--coral);font-weight:800;font-variant-numeric:tabular-nums}.time-rail i{width:10px;height:10px;border:3px solid var(--coral);border-radius:50%;background:var(--paper);margin-right:4px}.time-end{color:var(--muted);font-size:13px}.item-body{min-width:0}.item-topline{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}.kind-badge,.status-badge,.booking-badge{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:3px 8px;font-size:11px;line-height:1.2;background:var(--wash);color:var(--deep)}.status-planned{background:#e6f2e9}.status-verified{background:#e4f0eb}.status-conditional,.status-unknown{background:#fff1df;color:#8b5a2f}.booking-badge{background:#fff8ee;color:#8b5a2f}.item-description{font-size:15px;margin:8px 0}.item-meta{display:flex;flex-wrap:wrap;gap:6px 16px;color:var(--muted);font-size:13px;margin-top:10px}.admission-note{color:var(--coral);font-size:13px}.item-tips{margin:10px 0 0;padding-left:20px;color:var(--muted);font-size:13px}.table-scroll{overflow-x:auto}.comparison-table,.alternatives-table{min-width:650px}.comparison-table td,.comparison-table th,.alternatives-table td,.alternatives-table th{vertical-align:top}.strategy-card,.weather-card{margin-bottom:14px}.hero-route{margin:26px 0 0;border:1px solid var(--line);border-radius:18px;background:linear-gradient(120deg,#edf7f0,#fff8ed);padding:14px 18px}.hero-route .route-line{display:flex;align-items:center;gap:8px;color:var(--ink);font-weight:800}.hero-route .route-line i{flex:1;height:3px;background:linear-gradient(90deg,var(--coral),var(--line));border-radius:999px}.hero-route .route-meta{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-top:6px}@media(max-width:760px){.reason-grid{grid-template-columns:1fr}.timeline-card{grid-template-columns:1fr;gap:8px}.time-rail{flex-direction:row;align-items:center;justify-content:flex-start;gap:8px}.time-rail i{order:2}.time-end{order:3}.hero-route .route-line{font-size:13px}.hero-route .route-line i{min-width:20px}}
 body.departure .reason-grid,body.departure .strategy-card,body.departure .weather-card{display:none}
 .plan-notice{margin:0 62px;padding:18px 20px;border:1px solid #e4b8a8;border-radius:18px;background:linear-gradient(110deg,#fff5ee,#fffaf1);display:grid;grid-template-columns:minmax(190px,.8fr) 1.2fr;gap:24px;align-items:start}.plan-notice strong{font-size:22px;color:var(--coral)}.plan-notice p{margin:3px 0 0;color:var(--muted)}.plan-notice ul{margin:0;padding-left:20px}.plan-notice li{margin:3px 0}.plan-notice li b{color:var(--coral);margin-right:6px}.plan-notice li span{display:block;color:var(--muted);font-size:12px}@media(max-width:760px){.plan-notice{margin:0 22px;grid-template-columns:1fr;gap:8px}}
+.transport-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.transport-card{border:1px solid var(--line);border-radius:16px;background:#fffdf8;padding:16px;display:grid;grid-template-columns:1fr auto;gap:8px 14px}.transport-card h3{font-size:21px}.transport-card h3 b{color:var(--coral);padding:0 4px}.transport-card p{margin:3px 0;color:var(--muted)}.transport-status{text-align:right}.transport-status strong{font-size:13px;color:var(--muted);margin-top:8px}.transport-note{grid-column:1/-1;border-top:1px dashed var(--line);padding-top:8px}.weather-list{margin:10px 0;padding-left:18px}.weather-list li{margin:4px 0}.risk-list{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding-left:20px}.risk-list li{padding-right:12px}.item-evidence{margin-top:12px;background:#f8f4eb;border-color:#e7dcc8;padding:9px 12px}.item-evidence summary{font-size:13px}.item-evidence ul{margin:8px 0 0;padding-left:18px}.item-evidence li{margin:4px 0}.item-evidence li span{display:block;color:var(--coral);font-size:12px}.item-note{color:var(--muted);font-size:13px;margin-top:10px}.sidebar nav a{font-size:13px}@media(max-width:760px){.transport-grid,.risk-list{grid-template-columns:1fr}.transport-card{grid-template-columns:1fr}.transport-status{text-align:left}}
+.place-row,.rule-row{display:flex;align-items:center;gap:8px;color:var(--deep);font-size:13px;margin-top:8px}.place-row span{color:var(--muted);font-size:12px}.rule-row{color:var(--muted)}.hero-route-svg{display:block;width:100%;height:76px;margin-bottom:4px}.hero-route-svg path{fill:none;stroke:var(--coral);stroke-width:3;stroke-dasharray:7 7;opacity:.75}.hero-route-svg circle{fill:var(--paper);stroke:var(--ink);stroke-width:3}.hero-route-svg text{fill:var(--ink);font-size:12px;font-weight:800}.day-stats{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px}.day-stats span{border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--muted);font-size:12px;background:#fffdf8}
 """
     page = page.replace("</style>", css + "</style>", 1)
     script = """
