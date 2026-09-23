@@ -117,6 +117,8 @@ def invalidate_changed_dependencies(original: dict, new: dict) -> set[str]:
     changed_legs = set()
     for leg in new.get("legs", []):
         if leg.get("from_id") in changed_places or leg.get("to_id") in changed_places:
+            if leg.get("evidence_level") == "planned":
+                continue
             changed_legs.add(leg["leg_id"])
             leg.update({"evidence_level": "unknown", "time_min": None, "time_max": None, "retrieved_at": None, "source_ids": []})
             leg["note"] = (leg.get("note") + "；" if leg.get("note") else "") + "依赖地点已修改，路线待重查"
@@ -129,6 +131,8 @@ def invalidate_changed_dependencies(original: dict, new: dict) -> set[str]:
             fact.setdefault("conflicts", []).append("依赖对象已修改，待重查")
     for day in new.get("itinerary", {}).get("days", []):
         for item in day.get("items", []):
+            if item.get("verification_status") == "planned":
+                continue
             if item.get("place_id") in changed_places or item.get("incoming_leg_id") in changed_legs or changed_facts.intersection(item.get("fact_ids", [])):
                 item["verification_status"] = "unknown"
     affected = changed_places | changed_legs | changed_facts

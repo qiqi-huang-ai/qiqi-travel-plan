@@ -952,6 +952,7 @@
           "enum": [
             "tool_route",
             "public_route",
+            "planned",
             "estimate",
             "unknown"
           ]
@@ -1440,6 +1441,7 @@
         "verification_status": {
           "enum": [
             "verified",
+            "planned",
             "conditional",
             "estimate",
             "unknown",
@@ -1562,6 +1564,17 @@
         },
         "deadline": {
           "$ref": "#/$defs/nullableString"
+        },
+        "deadline_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/datetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "可选的精确截止时间。只有此字段为 ISO 时间时，离线 HTML 才显示倒计时。"
         },
         "action": {
           "type": "string"

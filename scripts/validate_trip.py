@@ -364,6 +364,7 @@ def semantic_checks(trip: dict, audit: Audit) -> None:
 
 
 def _check_day_rules(day, parsed, places, facts, alternatives, audit):
+    reported_booking_items = set()
     for index, item in enumerate(day["items"]):
         if item.get("kind") in ("transit", "transport_major"):
             if item.get("admission_item_id"):
@@ -377,12 +378,17 @@ def _check_day_rules(day, parsed, places, facts, alternatives, audit):
             continue
         if item.get("kind") == "visit" and not item.get("fact_ids"):
             audit.issue("conditional", [item["item_id"]], "游览项没有挂接事实依据", "补开放/入场 FactRecord")
+        admission_parent = next((candidate for candidate in day["items"] if candidate["item_id"] == item.get("admission_item_id")), None)
         booking = (place.get("booking") or {}).get("required")
-        status = item.get("booking_status")
-        if booking is True and status == "not_required":
-            audit.issue("blocking", [item["item_id"]], "地点需要预约但行程写成无需预约", "核对地点或预约状态")
-        if booking is True and status in ("pending_user", "not_open", "unknown", "user_claimed"):
-            audit.issue("conditional", [item["item_id"]], "地点预约尚未确认", "写明渠道、截止时间、失败替代")
+        booking_item = admission_parent or item
+        status = booking_item.get("booking_status")
+        booking_ids = [booking_item["item_id"]]
+        if booking is True and status == "not_required" and booking_item["item_id"] not in reported_booking_items:
+            audit.issue("blocking", booking_ids, "地点需要预约但行程写成无需预约", "核对地点或预约状态")
+            reported_booking_items.add(booking_item["item_id"])
+        if booking is True and status in ("pending_user", "not_open", "unknown", "user_claimed") and booking_item["item_id"] not in reported_booking_items:
+            audit.issue("conditional", booking_ids, "地点预约尚未确认", "写明渠道、截止时间、失败替代")
+            reported_booking_items.add(booking_item["item_id"])
             if item.get("verification_status") == "verified":
                 audit.issue("blocking", [item["item_id"]], "预约未确认却标记 verified", "降级为 conditional")
         if status == "failed":

@@ -66,6 +66,48 @@ class CoreContractTests(unittest.TestCase):
         self.assertEqual(linked_item["verification_status"], "unknown")
         self.assertTrue(changed["recheck_queue"])
 
+    def test_user_confirmed_plan_survives_evidence_invalidation(self):
+        original = trip()
+        edited = copy.deepcopy(original)
+        item = next(i for d in edited["itinerary"]["days"] for i in d["items"] if i["place_id"] == "place-museum")
+        item["verification_status"] = "planned"
+        next(p for p in edited["places"] if p["place_id"] == "place-museum")["entrance"] = "西门"
+
+        state_io.invalidate_changed_dependencies(original, edited)
+
+        self.assertEqual(item["verification_status"], "planned")
+
+    def test_user_confirmed_route_survives_place_change(self):
+        original = trip()
+        edited = copy.deepcopy(original)
+        leg = next(leg for leg in edited["legs"] if leg["to_id"] == "place-museum")
+        leg.update({"evidence_level": "planned", "time_min": 20, "time_max": 20})
+        next(p for p in edited["places"] if p["place_id"] == "place-museum")["entrance"] = "西门"
+
+        state_io.invalidate_changed_dependencies(original, edited)
+
+        self.assertEqual(leg["evidence_level"], "planned")
+        self.assertEqual(leg["time_max"], 20)
+
+    def test_visit_can_reuse_a_same_day_admission_booking(self):
+        data = trip()
+        day = data["itinerary"]["days"][0]
+        parent = next(item for item in day["items"] if item["item_id"] == "item-d1-museum")
+        parent["planned_end"] = "2026-10-10T12:00:00+08:00"
+        child = copy.deepcopy(parent)
+        child.update({
+            "item_id": "item-d1-museum-walk",
+            "planned_start": "2026-10-10T12:00:00+08:00",
+            "planned_end": "2026-10-10T13:00:00+08:00",
+            "booking_status": "not_required",
+            "admission_item_id": parent["item_id"],
+        })
+        day["items"].insert(day["items"].index(parent) + 1, child)
+
+        _, report = audit(data)
+
+        self.assertFalse(any("地点需要预约" in issue["evidence"] and child["item_id"] in issue["affected_ids"] for issue in report.issues), report.issues)
+
     def test_stale_and_conflicting_information_enters_recheck_queue(self):
         data = trip()
         data["facts"][0]["stale_after"] = "2020-01-01T00:00:00+00:00"
@@ -101,6 +143,18 @@ class CoreContractTests(unittest.TestCase):
             self.assertIn("localStorage", html)
             self.assertNotIn("<script src=", html)
             self.assertNotIn("<link rel=\"stylesheet\"", html)
+
+    def test_traveler_html_does_not_dump_history_or_internal_provider_state(self):
+        data = trip()
+        data["changelog"].append({"version": 99, "summary": "旧版内部记录，不能出现在旅行者页面", "at": "2026-10-01T10:00:00+08:00"})
+        data["decisions"].append({"decision_id": "internal", "topic": "provider", "options": [], "user_choice": "secret_store", "time": "2026-10-01T10:00:00+08:00", "affected_ids": [], "note": "available/granted"})
+        page = render_outputs.render_html(render_outputs.Ctx(data))
+
+        self.assertIn("现在要完成", page)
+        self.assertIn("查看核查依据与待确认事项", page)
+        self.assertNotIn("旧版内部记录，不能出现在旅行者页面", page)
+        self.assertNotIn("available/granted", page)
+        self.assertNotIn("补充记录", page)
 
     def test_unknown_route_does_not_gain_fake_duration(self):
         data = trip()

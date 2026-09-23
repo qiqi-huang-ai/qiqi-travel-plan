@@ -29,7 +29,7 @@ def evaluate(trip: dict, trip_path: str | None = None, manifest_path: str | None
     a01 = all(
         i.get("planned_start") and i.get("planned_end")
         and (i.get("place_id") in places or i["kind"] in ("transit", "rest", "free", "buffer", "checkout", "transport_major"))
-        and i.get("verification_status") in ("verified", "conditional", "estimate", "unknown", "blocked")
+        and i.get("verification_status") in ("verified", "planned", "conditional", "estimate", "unknown", "blocked")
         for i in items
     )
     a02 = all(not i.get("incoming_leg_id") or i["incoming_leg_id"] in legs for i in items)

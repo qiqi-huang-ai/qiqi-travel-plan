@@ -190,13 +190,16 @@ class MaturityTests(unittest.TestCase):
             self.assertIn(runner, workflow)
         self.assertIn("python -m compileall", workflow)
 
-    def test_offline_h5_has_departure_mode_dark_mode_and_deadlines(self):
+    def test_offline_h5_has_real_departure_mode_and_structured_deadlines(self):
         trip = migrate_trip.migrate(sample())
+        trip["itinerary"]["checklist"][0]["deadline_at"] = "2026-10-03T20:00:00+08:00"
         html = ro.render_html(ro.Ctx(trip))
         self.assertIn('id="departure-mode"', html)
         self.assertIn("prefers-color-scheme:dark", html)
-        self.assertIn('data-deadline="2026-10-03 20:00"', html)
+        self.assertIn('data-deadline="2026-10-03T20:00:00+08:00"', html)
         self.assertIn('class="countdown"', html)
+        self.assertIn("body.departure .departure-hide", html)
+        self.assertIn("departure-day", html)
 
     def test_tikhub_cli_requires_explicit_live_or_dry_run(self):
         with tempfile.TemporaryDirectory() as td:
@@ -231,7 +234,7 @@ class MaturityTests(unittest.TestCase):
         ctx = ro.Ctx(trip)
         md = ro.render_md(ctx)
         html = ro.html_to_text(ro.render_html(ctx))
-        for value in ("重新核查博物馆开放时间", "fact-museum-opening"):
+        for value in ("重新核查博物馆开放时间",):
             self.assertIn(value, md)
             self.assertIn(value, html)
 
