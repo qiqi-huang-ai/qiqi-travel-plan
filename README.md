@@ -75,8 +75,15 @@
 
 ## 三步开始
 
-1. 下载本仓库，把文件夹命名为 `travel-plan-pro`，放进项目的 `.codex/skills/` 目录。
-2. 在 Codex 里说：
+1. 新开一个 Codex 对话，直接说：
+
+   ```text
+   请从 https://github.com/qiqi-huang-ai/qiqi-travel-plan 安装 qiqi 旅行规划 Skill。
+   ```
+
+   安装完成后，新开一个对话即可使用。若你的 Codex 无法从链接安装，再下载 ZIP，解压后把 `travel-plan-pro` 放进项目的 `.codex/skills/` 目录。
+
+2. 在新对话里说：
 
    ```text
    请使用 $travel-plan-pro，帮我规划一次旅行。
